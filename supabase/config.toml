@@ -1,0 +1,10 @@
+project_id = "hditwqpjywfqluenhnlj"
+
+[functions.voice-chat]
+verify_jwt = false
+
+[functions.generate-game]
+verify_jwt = true
+
+[functions.submit-score]
+verify_jwt = true

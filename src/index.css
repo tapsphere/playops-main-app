@@ -1,0 +1,101 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    --background: 0 0% 0%;
+    --foreground: 75 100% 80%;
+
+    --card: 0 0% 5%;
+    --card-foreground: 75 100% 80%;
+
+    --popover: 0 0% 5%;
+    --popover-foreground: 75 100% 80%;
+
+    --primary: 130 100% 50%;
+    --primary-foreground: 0 0% 0%;
+
+    --secondary: 0 0% 10%;
+    --secondary-foreground: 130 100% 70%;
+
+    --muted: 0 0% 15%;
+    --muted-foreground: 130 50% 50%;
+
+    --accent: 291 92% 43%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 130 100% 40%;
+    --input: 130 100% 40%;
+    --ring: 130 100% 50%;
+
+    --neon-green: 130 100% 50%;
+    --neon-purple: 284 41% 42%;
+    --neon-magenta: 291 92% 43%;
+    
+    --glow-green: 0 0 20px hsl(130 100% 50% / 0.6);
+    --glow-purple: 0 0 20px hsl(280 70% 55% / 0.5);
+
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+@layer utilities {
+  .text-glow-green {
+    text-shadow: 0 0 20px hsl(var(--neon-green) / 0.8),
+                 0 0 40px hsl(var(--neon-green) / 0.6),
+                 0 0 60px hsl(var(--neon-green) / 0.4);
+  }
+  
+  .text-glow-purple {
+    text-shadow: 0 0 20px hsl(var(--neon-purple) / 0.8),
+                 0 0 40px hsl(var(--neon-purple) / 0.5);
+  }
+  
+  .text-glow-magenta {
+    text-shadow: 0 0 20px hsl(var(--neon-magenta) / 0.8),
+                 0 0 40px hsl(var(--neon-magenta) / 0.5);
+  }
+
+  .border-glow-green {
+    box-shadow: 0 0 15px hsl(var(--neon-green) / 0.6),
+                0 0 30px hsl(var(--neon-green) / 0.4),
+                inset 0 0 10px hsl(var(--neon-green) / 0.2);
+  }
+  
+  .border-glow-purple {
+    box-shadow: 0 0 10px hsl(var(--neon-purple) / 0.5),
+                0 0 20px hsl(var(--neon-purple) / 0.3),
+                inset 0 0 10px hsl(var(--neon-purple) / 0.2);
+  }
+
+
+  .badge-symmetrical-chamfer {
+     clip-path: polygon(10px 0, calc(100%) 0, 100% 10px, 100% calc(100%), calc(100%) 100%, 100%, 0 calc(100%), 0 10px);
+  }
+
+  .typewriter {
+    display: inline-block;
+    overflow: hidden; /* Ensures the text is not visible until the animation starts */
+    white-space: nowrap; /* Keeps the text on a single line */
+    border-right: 0.15em solid hsl(var(--neon-green)); /* The blinking cursor */
+    animation-fill-mode: forwards; /* Keeps the final state of the animation */
+  }
+}
