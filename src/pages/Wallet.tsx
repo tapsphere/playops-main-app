@@ -2,18 +2,91 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useActiveAccount, useDisconnect } from 'thirdweb/react';
 import { useTonAddress, useTonConnectUI } from '@tonconnect/ui-react';
-import { Wallet as WalletIcon, Home, User, Hexagon, TrendingUp, Copy, ExternalLink, Coins, Zap } from 'lucide-react';
+import { Wallet as WalletIcon, Home, User, Hexagon, TrendingUp, Copy, ExternalLink, Coins } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { AriaButton } from '@/components/AriaButton';
 import { useAuth } from '@/contexts/AuthContext';
+import PlayerHeader from '@/components/ui/PlayerHeader';
+import { supabase } from '@/integrations/supabase/client';
 
 const Wallet = () => {
   const navigate = useNavigate();
   const [activeIndex, setActiveIndex] = useState(4);
-  const [plyoBalance, setPlyoBalance] = useState('1,250.00');
   const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const [totalXp, setTotalXp] = useState(0);
+  const [totalPlyo, setTotalPlyo] = useState(0);
+  const [transactions, setTransactions] = useState<Array<{
+    type: string;
+    amount: string;
+    date: string;
+    desc: string;
+  }>>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const loadWalletData = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          console.log('loadWalletData: No user found');
+          setLoading(false);
+          return;
+        }
+        
+        // Load profile data
+        const { data: profileData, error: profileError } = await supabase
+          .from('profiles')
+          .select('total_xp, total_plyo')
+          .eq('user_id', user.id)
+          .single();
+        
+        if (profileError) throw profileError;
+        if (profileData) {
+          setTotalXp(profileData.total_xp || 0);
+          setTotalPlyo(profileData.total_plyo || 0);
+        }
+
+        // Load recent game results (transactions)
+        const { data: gameResults, error: resultsError } = await supabase
+          .from('game_results')
+          .select(`
+            created_at,
+            passed,
+            scoring_metrics,
+            game_templates(name),
+            brand_customizations(game_templates(name))
+          `)
+          .eq('user_id', user.id)
+          .eq('passed', true) // Only show winning transactions
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        if (resultsError) throw resultsError;
+
+        // Format transactions (PLYO earned = 10 per passed game)
+        const formattedTransactions = (gameResults || []).map(result => {
+          const gameName = (result.game_templates as any)?.name || 
+                          (result.brand_customizations as any)?.game_templates?.name || 
+                          'Validator Game';
+          return {
+            type: 'Earned',
+            amount: '+10',
+            date: new Date(result.created_at).toISOString().split('T')[0],
+            desc: gameName
+          };
+        });
+
+        setTransactions(formattedTransactions);
+      } catch (error) {
+        console.error('Failed to load wallet data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadWalletData();
+  }, []);
 
   // App's auth state
   const { logout, isLoading: isAuthLoading, loggedIn } = useAuth();
@@ -35,31 +108,11 @@ const Wallet = () => {
   // Optimistic UI state
   const [optimisticIsConnected, setOptimisticIsConnected] = useState(isActuallyConnected);
 
-  // Sync optimistic state with real state
-  useEffect(() => {
-    setOptimisticIsConnected(isActuallyConnected);
-  }, [isActuallyConnected]);
-
-  // Handle application logout safely
-  useEffect(() => {
-    // Wait for both app auth and wallet restoration to finish
-    if (isAuthLoading || isWalletRestoring) {
-      return;
-    }
-
-    // If everything is loaded and we are not connected, then log out
-    if (!isActuallyConnected && loggedIn) {
-      logout();
-    }
-  }, [isActuallyConnected, loggedIn, logout, isAuthLoading, isWalletRestoring]);
-
   // Handle the disconnect button click
   const handleDisconnect = async () => {
     if (isDisconnecting) return;
     
-    setOptimisticIsConnected(false);
     setIsDisconnecting(true);
-
     try {
       if (evmAccount) {
         await disconnect();
@@ -68,8 +121,11 @@ const Wallet = () => {
         await tonConnectUI.disconnect();
       }
     } catch (error) {
-      console.error("Error during background disconnect:", error);
+      console.error("Error during wallet disconnect:", error);
     } finally {
+      // Always log out the user from the app session
+      await logout();
+      setOptimisticIsConnected(false);
       setIsDisconnecting(false);
     }
   };
@@ -113,30 +169,7 @@ const Wallet = () => {
 
   return (
     <div className="relative w-full min-h-screen bg-black pb-24">
-      <AriaButton />
-      <div
-        className="border-b-2 p-4"
-        style={{ borderColor: 'hsl(var(--neon-green))' }}
-      >
-        <div className="max-w-7xl mx-auto">
-          <div className="flex justify-end gap-2">
-            <div className="bg-black/50 border-2 rounded-lg px-3 py-1.5 flex items-center gap-2" style={{ borderColor: 'hsl(var(--neon-green))' }}>
-              <Zap className="w-4 h-4" style={{ color: 'hsl(var(--neon-green))' }} fill="hsl(var(--neon-green))" />
-              <div className="text-right">
-                <div className="text-xs font-mono" style={{ color: 'hsl(var(--neon-green) / 0.7)' }}>XP</div>
-                <div className="text-sm font-bold" style={{ color: 'hsl(var(--neon-green))' }}>2,450</div>
-              </div>
-            </div>
-            <div className="bg-black/50 border-2 rounded-lg px-3 py-1.5 flex items-center gap-2" style={{ borderColor: 'hsl(var(--neon-magenta))' }}>
-              <Coins className="w-4 h-4" style={{ color: 'hsl(var(--neon-magenta))' }} />
-              <div className="text-right">
-                <div className="text-xs font-mono" style={{ color: 'hsl(var(--neon-magenta) / 0.7)' }}>PLYO</div>
-                <div className="text-sm font-bold" style={{ color: 'hsl(var(--neon-magenta))' }}>1,250</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <PlayerHeader totalXp={totalXp} totalPlyo={totalPlyo} />
 
       <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
         {!optimisticIsConnected ? (
@@ -224,7 +257,7 @@ const Wallet = () => {
                   PLYO Balance
                 </p>
                 <h2 className="text-5xl font-bold mb-6 text-glow-magenta tracking-wider" style={{ color: 'hsl(var(--neon-magenta))' }}>
-                  {plyoBalance}
+                  {totalPlyo.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </h2>
                 <p className="text-xs font-mono" style={{ color: 'hsl(var(--neon-green) / 0.5)' }}>
                   1 PLYO = 1 USD equivalent
@@ -237,11 +270,10 @@ const Wallet = () => {
                 Recent Transactions
               </h3>
               <div className="space-y-3">
-                {[
-                  { type: 'Earned', amount: '+250', date: '2025-03-15', desc: 'Competency Validation' },
-                  { type: 'Earned', amount: '+500', date: '2025-03-10', desc: 'Program Completion' },
-                  { type: 'Earned', amount: '+100', date: '2025-03-05', desc: 'Daily Validator' },
-                ].map((tx, idx) => (
+                {loading ? (
+                  <div className="text-center py-8 text-gray-400">Loading transactions...</div>
+                ) : transactions.length > 0 ? (
+                  transactions.map((tx, idx) => (
                   <Card key={idx} className="bg-black/50 border-2 p-4 hover:bg-black/70 transition-all" style={{ borderColor: 'hsl(var(--neon-green))' }}>
                     <div className="flex items-center justify-between">
                       <div className="flex-1">
@@ -267,7 +299,12 @@ const Wallet = () => {
                       </div>
                     </div>
                   </Card>
-                ))}
+                  ))
+                ) : (
+                  <Card className="bg-black/50 border-2 p-6 text-center" style={{ borderColor: 'hsl(var(--neon-green))' }}>
+                    <p className="text-sm font-mono text-gray-400">No transactions yet. Complete games to earn PLYO!</p>
+                  </Card>
+                )}
               </div>
             </div>
 

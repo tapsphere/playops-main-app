@@ -4,8 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Building2, Search, Target, ChevronRight, Star, Zap, Rocket, Sparkles, Home, User, Hexagon, TrendingUp, Wallet, Coins } from 'lucide-react';
-import { AriaButton } from '@/components/AriaButton';
+import { Building2, Search, Target, ChevronRight, Star, Zap, Rocket, Sparkles, Home, User, Hexagon, TrendingUp, Wallet } from 'lucide-react';
+import PlayerHeader from '@/components/ui/PlayerHeader';
 import { WalletConnect } from '@/components/WalletConnect';
 import { useTonWallet, useTonConnectUI } from '@tonconnect/ui-react';
 import { useActiveAccount } from 'thirdweb/react';
@@ -32,7 +32,7 @@ type LiveGame = {
   logo_url: string | null;
   primary_color: string;
   secondary_color: string;
-  brand_name: string | null;
+  brand_name: string;
   game_templates: {
     name: string;
     preview_image: string | null;
@@ -50,6 +50,8 @@ const Lobby = () => {
   const [activeIndex, setActiveIndex] = useState(0);
   const [liveGames, setLiveGames] = useState<LiveGame[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [totalXp, setTotalXp] = useState(0);
+  const [totalPlyo, setTotalPlyo] = useState(0);
 
   const { toast: showToast } = useToast();
 
@@ -62,19 +64,69 @@ const Lobby = () => {
   ];
 
   useEffect(() => {
+    const loadProfileData = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          console.log('loadProfileData: No user found');
+          return;
+        }
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('total_xp, total_plyo')
+          .eq('user_id', user.id)
+          .single();
+        
+        // Handle errors gracefully, especially cached build issues
+        if (error) {
+          if (error.code === '42703' && error.message?.includes('role')) {
+            console.warn('Profiles.role query detected (cached build issue). Retrying with explicit columns.');
+            // Retry with explicit columns
+            const { data: retryData, error: retryError } = await supabase
+              .from('profiles')
+              .select('total_xp, total_plyo')
+              .eq('user_id', user.id)
+              .single();
+            if (retryError) {
+              console.error('Failed to load profile data after retry:', retryError);
+              return;
+            }
+            if (retryData) {
+              setTotalXp(retryData.total_xp || 0);
+              setTotalPlyo(retryData.total_plyo || 0);
+            }
+            return;
+          }
+          throw error;
+        }
+        
+        if (data) {
+          setTotalXp(data.total_xp || 0);
+          setTotalPlyo(data.total_plyo || 0);
+        }
+      } catch (error: any) {
+        // Don't crash the app if profile data fails to load
+        console.error('Failed to load profile data:', error);
+        // Set defaults to prevent UI issues
+        setTotalXp(0);
+        setTotalPlyo(0);
+      }
+    };
+
     if (loggedIn) {
       loadLiveGames();
+      loadProfileData();
     }
   }, [loggedIn]);
 
   const loadLiveGames = async () => {
     try {
-      const { data, error } = await supabase
+      const { data: games, error: gamesError } = await supabase
         .from('brand_customizations')
         .select(
           `
           id,
-          unique_code: id,
+          unique_code,
           brand_id,
           logo_url,
           primary_color,
@@ -82,18 +134,30 @@ const Lobby = () => {
           game_templates (name, preview_image)
           `
         )
-        .not('published_at', 'is', null);
+        .not('published_at', 'is', null)
+        .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (gamesError) throw gamesError;
 
-      const mappedGames: LiveGame[] = data.map((item: any) => ({
+      const brandIds = [...new Set(games.map(g => g.brand_id))];
+
+      const { data: profiles, error: profilesError } = await supabase
+        .from('profiles')
+        .select('user_id, company_name')
+        .in('user_id', brandIds);
+
+      if (profilesError) throw profilesError;
+
+      const profilesMap = new Map(profiles.map(p => [p.user_id, p.company_name]));
+
+      const mappedGames: LiveGame[] = games.map((item: any) => ({
         id: item.id,
         unique_code: item.unique_code,
         brand_id: item.brand_id,
         logo_url: item.logo_url || null,
         primary_color: item.primary_color || '#00ff00',
         secondary_color: item.secondary_color || '#ff00ff',
-        brand_name: item.brand_name || null,
+        brand_name: profilesMap.get(item.brand_id) || 'Brand',
         game_templates: {
           name: item.game_templates?.name || 'Validator',
           preview_image: item.game_templates?.preview_image || null,
@@ -144,34 +208,7 @@ const Lobby = () => {
 
   return (
     <div className="relative w-full min-h-screen bg-black pb-24">
-      {/* ARIA Access Button */}
-      <AriaButton />
-      
-      {/* Header */}
-      <div 
-        className="border-b-2 p-4"
-        style={{ borderColor: 'hsl(var(--neon-green))' }}
-      >
-        <div className="max-w-7xl mx-auto">
-          {/* XP Display */}
-          <div className="flex justify-end gap-2">
-            <div className="bg-black/50 border-2 rounded-lg px-3 py-1.5 flex items-center gap-2" style={{ borderColor: 'hsl(var(--neon-green))' }}>
-              <Zap className="w-4 h-4" style={{ color: 'hsl(var(--neon-green))' }} fill="hsl(var(--neon-green))" />
-              <div className="text-right">
-                <div className="text-xs font-mono" style={{ color: 'hsl(var(--neon-green) / 0.7)' }}>XP</div>
-                <div className="text-sm font-bold" style={{ color: 'hsl(var(--neon-green))' }}>2,450</div>
-              </div>
-            </div>
-            <div className="bg-black/50 border-2 rounded-lg px-3 py-1.5 flex items-center gap-2" style={{ borderColor: 'hsl(var(--neon-magenta))' }}>
-              <Coins className="w-4 h-4" style={{ color: 'hsl(var(--neon-magenta))' }} />
-              <div className="text-right">
-                <div className="text-xs font-mono" style={{ color: 'hsl(var(--neon-magenta) / 0.7)' }}>PLYO</div>
-                <div className="text-sm font-bold" style={{ color: 'hsl(var(--neon-magenta))' }}>1,250</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <PlayerHeader totalXp={totalXp} totalPlyo={totalPlyo} />
 
       {/* Search Bar */}
       <div className="max-w-7xl mx-auto px-4 py-6">

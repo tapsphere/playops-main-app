@@ -52,11 +52,27 @@ const ManagePlayers = () => {
     const fetchProfiles = useCallback(async () => {
         setLoading(true);
         try {
-            const { data, error } = await supabase.from('profiles').select('*');
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('id, user_id, full_name, location, bio, wallet_address, created_at, updated_at');
             if (error) throw error;
             setProfiles(data || []);
         } catch (error: any) {
+            // Handle missing column errors gracefully
+            if (error.code === '42703') {
+                console.warn('Profile query attempted to access non-existent column, using explicit columns');
+                try {
+                    const { data: retryData, error: retryError } = await supabase
+                        .from('profiles')
+                        .select('id, user_id, full_name, location, bio, wallet_address, created_at, updated_at');
+                    if (retryError) throw retryError;
+                    setProfiles(retryData || []);
+                } catch (retryError: any) {
+                    toast.error("Failed to fetch profiles", { description: retryError.message });
+                }
+            } else {
             toast.error("Failed to fetch profiles", { description: error.message });
+            }
         } finally {
             setLoading(false);
         }

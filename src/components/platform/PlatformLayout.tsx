@@ -13,7 +13,18 @@ export const PlatformLayout = () => {
 
   useEffect(() => {
     if (!loggedIn) {
-      navigate(`/auth?redirect=${location.pathname}`);
+      const path = location.pathname;
+      let authPath = '/auth';
+      
+      if (path.startsWith('/platform/admin')) {
+        authPath = '/auth/admin';
+      } else if (path.startsWith('/platform/creator')) {
+        authPath = '/auth/creator';
+      } else if (path.startsWith('/platform/brand')) {
+        authPath = '/auth/brand';
+      }
+      
+      navigate(`${authPath}?redirect=${location.pathname}`);
       return;
     }
 
@@ -23,7 +34,7 @@ export const PlatformLayout = () => {
 
       if (path.startsWith('/platform/admin')) {
         requiredRole = 'admin';
-      } else if (path === '/platform/creator') {
+      } else if (path.startsWith('/platform/creator')) {
         requiredRole = 'creator';
       } else if (path.startsWith('/platform/brand')) {
         requiredRole = 'brand';

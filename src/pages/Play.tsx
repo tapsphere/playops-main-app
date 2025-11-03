@@ -7,6 +7,54 @@ import { Loader2, AlertCircle, ArrowLeft, Edit, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
+const triggerConfetti = () => {
+  const colors = ['#00ff00', '#ff00ff', '#9945ff', '#ffd700'];
+  const confettiCount = 200;
+  
+  for (let i = 0; i < confettiCount; i++) {
+    setTimeout(() => {
+      const confetti = document.createElement('div');
+      confetti.style.position = 'fixed';
+      confetti.style.width = `${Math.random() * 10 + 5}px`;
+      confetti.style.height = `${Math.random() * 10 + 5}px`;
+      confetti.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+      confetti.style.left = `${Math.random() * 100}%`;
+      confetti.style.top = '-10px';
+      confetti.style.opacity = '1';
+      confetti.style.pointerEvents = 'none';
+      confetti.style.zIndex = '9999';
+      confetti.style.borderRadius = Math.random() > 0.5 ? '50%' : '0';
+      
+      document.body.appendChild(confetti);
+      
+      const angle = Math.random() * Math.PI * 2;
+      const velocity = Math.random() * 10 + 5;
+      const xVelocity = Math.cos(angle) * velocity;
+      const yVelocity = Math.sin(angle) * velocity + 5;
+      
+      let x = parseFloat(confetti.style.left) / 100 * window.innerWidth;
+      let y = -10;
+      
+      const animate = () => {
+        y += yVelocity;
+        x += xVelocity + (Math.random() - 0.5) * 2;
+        
+        confetti.style.left = `${(x / window.innerWidth) * 100}%`;
+        confetti.style.top = `${y}px`;
+        confetti.style.opacity = `${Math.max(0, 1 - (y / window.innerHeight))}`;
+        
+        if (y < window.innerHeight && confetti.style.opacity !== '0') {
+          requestAnimationFrame(animate);
+        } else {
+          confetti.remove();
+        }
+      };
+      
+      requestAnimationFrame(animate);
+    }, i * 10);
+  }
+};
+
 type ValidatorData = {
   id: string;
   customization_prompt: string;
@@ -16,10 +64,13 @@ type ValidatorData = {
   generated_game_html: string | null;
   brand_id: string;
   unique_code: string | null;
+  template_id: string;
   game_templates: {
     name: string;
     description: string | null;
     preview_image: string | null;
+    competency_id: string;
+    selected_sub_competencies: string[];
   };
 };
 
@@ -33,13 +84,87 @@ export default function Play() {
   const [error, setError] = useState<string | null>(null);
   const [isOwner, setIsOwner] = useState(false);
 
+  const handleScoreSubmission = async (scoringMetrics: any, gameplayData: any) => {
+    if (!validator) return;
+
+    toast.info('Submitting your score...');
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error("You must be logged in to submit a score.");
+      }
+
+      // Get current XP/PLYO BEFORE submission to use as animation start
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (currentUser) {
+        const { data: currentProfile } = await supabase
+          .from('profiles')
+          .select('total_xp, total_plyo')
+          .eq('user_id', currentUser.id)
+          .single();
+        
+        if (currentProfile) {
+          sessionStorage.setItem('prevXp', (currentProfile.total_xp || 0).toString());
+          sessionStorage.setItem('prevPlyo', (currentProfile.total_plyo || 0).toString());
+        }
+      }
+
+      const { error: functionError } = await supabase.functions.invoke('submit-score', {
+        body: {
+          templateId: validator.template_id,
+          customizationId: validator.id,
+          competencyId: validator.game_templates.competency_id,
+          subCompetencyId: validator.game_templates.selected_sub_competencies[0], // Assuming the first sub competency
+          scoringMetrics,
+          gameplayData,
+        },
+      });
+
+      if (functionError) {
+        throw functionError;
+      }
+      
+      toast.success('Score submitted successfully! Redirecting to profile...');
+      
+      // Confetti animation
+      triggerConfetti();
+      
+      // Set flag to animate XP/PLYO on profile page
+      sessionStorage.setItem('animateXp', 'true');
+      
+      setTimeout(() => navigate('/profile'), 3000);
+
+    } catch (error: any) {
+      console.error("Failed to submit score:", error);
+      toast.error(error.message || "An error occurred while submitting your score.");
+    }
+  };
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'gameSubmit') {
+        console.log('Received game submission from iframe:', event.data);
+        const { scoringMetrics, gameplayData: rawGameplayData } = event.data.payload;
+        const gameplayData = rawGameplayData || event.data.payload;
+        handleScoreSubmission(scoringMetrics, gameplayData);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+    };
+  }, [validator]);
+
   useEffect(() => {
     if (code) {
       loadValidator();
     }
   }, [code]);
 
-const loadValidator = async () => {
+  const loadValidator = async () => {
     try {
       if (!code) return;
 
@@ -53,14 +178,17 @@ const loadValidator = async () => {
           logo_url,
           generated_game_html,
           brand_id,
-          unique_code: id,
+          unique_code,
+          template_id,
           game_templates (
             name,
             description,
-            preview_image
+            preview_image,
+            competency_id,
+            selected_sub_competencies
           )
         `)
-        .eq('id', code)
+        .eq('unique_code', code)
         .single();
 
       if (error) throw error;
@@ -74,7 +202,7 @@ const loadValidator = async () => {
     } catch (error: any) {
       console.error('Failed to load validator:', error);
       setError('Failed to load validator');
-      toast.error('Failed to load validator');
+      toast.error(error.message);
     } finally {
       setLoading(false);
     }
@@ -140,73 +268,11 @@ const loadValidator = async () => {
                 srcDoc={validator.generated_game_html}
                 className="w-full h-full border-0"
                 title="Game Validator"
-                sandbox="allow-scripts allow-same-origin allow-forms"
+                sandbox="allow-scripts allow-same-origin allow-forms allow-top-navigation"
               />
             </div>
 
-            {/* Owner Controls Section - Scrollable */}
-            {isOwner && (
-              <div className="bg-gray-900 border-t-2 border-neon-green py-8">
-                <div className="max-w-4xl mx-auto px-4 space-y-6">
-                  <h2 className="text-2xl font-bold text-neon-green mb-6">Game Management</h2>
-                  
-                  {/* Promote Section */}
-                  <Card className="bg-gray-800 border-gray-700 p-6">
-                    <div className="flex items-start gap-4">
-                      <div className="p-3 bg-blue-500/10 rounded-lg">
-                        <Share2 className="w-6 h-6 text-blue-400" />
-                      </div>
-                      <div className="flex-1">
-                        <h3 className="text-xl font-semibold text-white mb-2">Promote Your Game</h3>
-                        <p className="text-gray-400 mb-4">
-                          Share this game with your team or publish it to a wider audience.
-                        </p>
-                        <div className="flex gap-3">
-                          <Button 
-                            onClick={handleCopyLink}
-                            className="gap-2"
-                          >
-                            <Share2 className="h-4 w-4" />
-                            Copy Share Link
-                          </Button>
-                          <Button 
-                            variant="outline"
-                            onClick={() => navigate('/platform/brand')}
-                          >
-                            View Analytics
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  </Card>
-
-                  {/* Edit Section */}
-                  <Card className="bg-gray-800 border-gray-700 p-6">
-                    <div className="flex items-start gap-4">
-                      <div className="p-3 bg-purple-500/10 rounded-lg">
-                        <Edit className="w-6 h-6 text-purple-400" />
-                      </div>
-                      <div className="flex-1">
-                        <h3 className="text-xl font-semibold text-white mb-2">Edit Game Settings</h3>
-                        <p className="text-gray-400 mb-4">
-                          Modify game parameters, branding, or visibility settings.
-                        </p>
-                        <div className="flex gap-3">
-                          <Button 
-                            variant="outline"
-                            onClick={() => navigate('/platform/brand')}
-                            className="gap-2"
-                          >
-                            <Edit className="h-4 w-4" />
-                            Edit in Dashboard
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  </Card>
-                </div>
-              </div>
-            )}
+{/* Owner Controls Section Removed */}
           </div>
         ) : (
         /* Show preview if game hasn't been generated yet */

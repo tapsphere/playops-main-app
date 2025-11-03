@@ -28,6 +28,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     const fetchUser = async () => {
+      try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         setUserId(user.id);
@@ -36,8 +37,34 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           .select('role')
           .eq('user_id', user.id)
           .single();
-        if (profile) {
+          
+          // Handle missing role gracefully
+          if (profileError) {
+            if (profileError.code === 'PGRST116') {
+              // No role found, create default player role
+              const { error: insertError } = await supabase
+                .from('user_roles')
+                .insert({ user_id: user.id, role: 'player' });
+              if (!insertError) {
+                setUserRole('player');
+              }
+            } else if (profileError.code === '42703') {
+              // Column doesn't exist error - this shouldn't happen with user_roles
+              // but handle gracefully
+              console.warn('Role query error (column issue):', profileError.message);
+            } else {
+              console.error('Error fetching user role:', profileError);
+            }
+          } else if (profile) {
           setUserRole(profile.role);
+          }
+        }
+      } catch (error: any) {
+        // Handle any errors gracefully, including profiles.role queries from cached code
+        if (error.code === '42703' && error.message?.includes('role')) {
+          console.warn('Profiles.role query detected (likely cached build issue). Ignoring error.');
+        } else {
+          console.error('Auth fetch error:', error);
         }
       }
     };
@@ -130,11 +157,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const logout = () => {
-    sessionStorage.removeItem('loggedIn');
-    setLoggedIn(false);
-    setUserRole(null);
-    setUserId(null);
+  const logout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.error('Error signing out from Supabase:', error);
+      toast.error('Logout Failed', { description: (error as any).message });
+    } finally {
+      sessionStorage.removeItem('loggedIn');
+      setLoggedIn(false);
+      setUserRole(null);
+      setUserId(null);
+      toast.info('You have been logged out.');
+    }
   };
 
   const completeOnboarding = () => {

@@ -1,12 +1,13 @@
 import { useActiveAccount, useActiveWalletConnectionStatus } from 'thirdweb/react';
 import { useTonAddress } from '@tonconnect/ui-react';
-import { User, Award, TrendingUp, Shield, Home, Hexagon, Wallet, Zap, Coins } from 'lucide-react';
+import { User, Award, TrendingUp, Shield, Home, Hexagon, Wallet } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { AriaButton } from '@/components/AriaButton';
+import PlayerHeader from '@/components/ui/PlayerHeader';
+
 import { supabase } from '@/integrations/supabase/client';
 
 
@@ -14,7 +15,9 @@ type GameResult = {
   id: string;
   proficiency_level: string;
   scoring_metrics: any;
+  gameplay_data: any;
   created_at: string;
+  passed: boolean;
 };
 
 const mockCompetencies = [
@@ -117,12 +120,13 @@ const Profile = () => {
   const [activeIndex, setActiveIndex] = useState(1);
   const [gameResults, setGameResults] = useState<GameResult[]>([]);
   const [profile, setProfile] = useState<any>(null);
-  const [totalXp, setTotalXp] = useState(0);
-  const [level, setLevel] = useState(0);
-  const [currentLevelXp, setCurrentLevelXp] = useState(0);
-  const xpPerLevel = 200;
   const [loading, setLoading] = useState(true);
-  
+  const [displayedXp, setDisplayedXp] = useState(0);
+  const [displayedPlyo, setDisplayedPlyo] = useState(0);
+  const [prevXp, setPrevXp] = useState(0);
+  const [prevPlyo, setPrevPlyo] = useState(0);
+  const xpPerLevel = 200;
+
   const evmAccount = useActiveAccount();
   const evmAddress = evmAccount?.address;
   const tonAddress = useTonAddress();
@@ -134,72 +138,129 @@ const Profile = () => {
   const truncatedAddress = address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Not Connected';
 
   useEffect(() => {
-    loadGameResults();
-    loadProfileData();
-    loadExperienceData();
+    const loadData = async () => {
+      setLoading(true);
+      await Promise.all([loadGameResults(), loadProfileData()]);
+      setLoading(false);
+    };
+    loadData();
   }, []);
-  
+
   const loadGameResults = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      
+      if (!user) {
+        console.log('loadGameResults: No user found');
+        return;
+      }
       const { data, error } = await supabase
         .from('game_results')
         .select('*')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
-      
       if (error) throw error;
       setGameResults(data || []);
     } catch (error) {
       console.error('Failed to load game results:', error);
-    } finally {
-      setLoading(false);
     }
   };
 
   const loadProfileData = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
+      if (!user) {
+        console.log('loadProfileData: No user found');
+        return;
+      }
       const { data, error } = await supabase
         .from('profiles')
-        .select('*')
+        .select('id, user_id, full_name, location, bio, wallet_address, total_xp, total_plyo, created_at, updated_at')
         .eq('user_id', user.id)
         .single();
-
-      if (error) throw error;
+      if (error) {
+        // Handle specific error for missing role column gracefully
+        if (error.code === '42703' && error.message.includes('role')) {
+          console.warn('Profile query attempted to access non-existent role column, retrying without it');
+          // Retry without role
+          const { data: retryData, error: retryError } = await supabase
+            .from('profiles')
+            .select('id, user_id, full_name, location, bio, wallet_address, total_xp, total_plyo, created_at, updated_at')
+            .eq('user_id', user.id)
+            .single();
+          if (retryError) throw retryError;
+          setProfile(retryData);
+          return;
+        }
+        throw error;
+      }
       setProfile(data);
+      
+      // Animate XP/PLYO if they increased (and we came from Play page)
+      const newXp = data?.total_xp || 0;
+      const newPlyo = data?.total_plyo || 0;
+      
+      // Check if we came from Play page (via sessionStorage)
+      const shouldAnimate = sessionStorage.getItem('animateXp') === 'true';
+      const savedPrevXp = sessionStorage.getItem('prevXp');
+      const savedPrevPlyo = sessionStorage.getItem('prevPlyo');
+      sessionStorage.removeItem('animateXp');
+      
+      // Get previous values from sessionStorage or use current if first load
+      const previousXp = savedPrevXp ? parseInt(savedPrevXp, 10) : (prevXp || newXp);
+      const previousPlyo = savedPrevPlyo ? parseInt(savedPrevPlyo, 10) : (prevPlyo || newPlyo);
+      
+      if (shouldAnimate && (newXp > previousXp || newPlyo > previousPlyo)) {
+        animateValues(previousXp, newXp, previousPlyo, newPlyo);
+      } else {
+        setDisplayedXp(newXp);
+        setDisplayedPlyo(newPlyo);
+      }
+      
+      setPrevXp(newXp);
+      setPrevPlyo(newPlyo);
+      
+      // Save current values for next visit
+      sessionStorage.setItem('prevXp', newXp.toString());
+      sessionStorage.setItem('prevPlyo', newPlyo.toString());
     } catch (error) {
       console.error('Failed to load profile data:', error);
+      // Set empty profile to prevent UI crashes
+      setProfile(null);
     }
   };
 
-  const loadExperienceData = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data, error } = await supabase
-        .from('user_skills')
-        .select('xp_earned')
-        .eq('user_id', user.id);
-
-      if (error) throw error;
-
-      const total = data.reduce((acc, skill) => acc + skill.xp_earned, 0);
-      setTotalXp(total);
-      setLevel(Math.floor(total / xpPerLevel));
-      setCurrentLevelXp(total % xpPerLevel);
-    } catch (error) {
-      console.error('Failed to load experience data:', error);
-    }
+  const animateValues = (startXp: number, endXp: number, startPlyo: number, endPlyo: number) => {
+    const duration = 7000; // 7 seconds
+    const startTime = Date.now();
+    
+    const animate = () => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      
+      // Easing function for smooth animation
+      const easeOutCubic = 1 - Math.pow(1 - progress, 3);
+      
+      setDisplayedXp(Math.floor(startXp + (endXp - startXp) * easeOutCubic));
+      setDisplayedPlyo(Math.floor(startPlyo + (endPlyo - startPlyo) * easeOutCubic));
+      
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        setDisplayedXp(endXp);
+        setDisplayedPlyo(endPlyo);
+      }
+    };
+    
+    requestAnimationFrame(animate);
   };
+
+  const totalXp = displayedXp || profile?.total_xp || 0;
+  const totalPlyo = displayedPlyo || profile?.total_plyo || 0;
+  const level = Math.floor(totalXp / xpPerLevel);
+  const currentLevelXp = totalXp % xpPerLevel;
   
-  const masteryCount = gameResults.filter(r => r.proficiency_level === 'Mastery').length;
-  const proficientCount = gameResults.filter(r => r.proficiency_level === 'Proficient').length;
+  const masteryCount = gameResults.filter(r => (r.proficiency_level || '').toLowerCase() === 'mastery').length;
+  const proficientCount = gameResults.filter(r => (r.proficiency_level || '').toLowerCase() === 'proficient').length;
   const badgesCount = masteryCount + proficientCount;
 
   const menuItems = [
@@ -217,34 +278,7 @@ const Profile = () => {
 
   return (
     <div className="relative w-full min-h-screen bg-black pb-24">
-      {/* ARIA Access Button */}
-      <AriaButton />
-      
-      {/* Header */}
-      <div
-        className="border-b-2 p-4"
-        style={{ borderColor: 'hsl(var(--neon-green))' }}
-      >
-        <div className="max-w-7xl mx-auto">
-          {/* XP Display */}
-          <div className="flex justify-end gap-2">
-            <div className="bg-black/50 border-2 rounded-lg px-3 py-1.5 flex items-center gap-2" style={{ borderColor: 'hsl(var(--neon-green))' }}>
-              <Zap className="w-4 h-4" style={{ color: 'hsl(var(--neon-green))' }} fill="hsl(var(--neon-green))" />
-              <div className="text-right">
-                <div className="text-xs font-mono" style={{ color: 'hsl(var(--neon-green) / 0.7)' }}>XP</div>
-                <div className="text-sm font-bold" style={{ color: 'hsl(var(--neon-green))' }}>{totalXp}</div>
-              </div>
-            </div>
-            <div className="bg-black/50 border-2 rounded-lg px-3 py-1.5 flex items-center gap-2" style={{ borderColor: 'hsl(var(--neon-magenta))' }}>
-              <Coins className="w-4 h-4" style={{ color: 'hsl(var(--neon-magenta))' }} />
-              <div className="text-right">
-                <div className="text-xs font-mono" style={{ color: 'hsl(var(--neon-magenta) / 0.7)' }}>PLYO</div>
-                <div className="text-sm font-bold" style={{ color: 'hsl(var(--neon-magenta))' }}>1,250</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <PlayerHeader totalXp={totalXp} totalPlyo={totalPlyo} />
 
            <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
         {/* Player Card */}
@@ -262,7 +296,7 @@ const Profile = () => {
                 {profile?.full_name || 'Player'}
               </h2>
               <p className="text-sm font-mono" style={{ color: 'hsl(var(--neon-green) / 0.7)' }}>
-                Level {level} • XP: {totalXp}
+                Level {level} • Total XP: {totalXp}
               </p>
                  <Progress value={(currentLevelXp / xpPerLevel) * 100} className="h-2 my-2" />
               <div className="text-right text-xs font-mono" style={{ color: 'hsl(var(--neon-green) / 0.7)' }}>
@@ -335,7 +369,7 @@ const Profile = () => {
                       {result.proficiency_level}
                     </div>
                     <div className="text-lg font-bold mb-1" style={{ color: borderColor }}>
-                      {result.scoring_metrics?.score || 0}%
+                      {result.scoring_metrics?.final_score || 0}%
                     </div>
                     <div className="text-xs font-mono" style={{ color: 'hsl(var(--neon-green) / 0.5)' }}>
                       {new Date(result.created_at).toLocaleDateString()}
@@ -358,7 +392,7 @@ const Profile = () => {
               {gameResults.map((result, idx) => {
                 const isMastery = result.proficiency_level === 'Mastery';
                 const isProficient = result.proficiency_level === 'Proficient';
-                const isPass = result.scoring_metrics?.score >= 80;
+                const isPass = result.passed;
                 const borderColor = isMastery ? 'hsl(var(--neon-green))' : 
                                    isProficient ? 'hsl(var(--neon-purple))' : 
                                    'hsl(var(--neon-magenta))';
@@ -404,10 +438,18 @@ const Profile = () => {
                           <div className="flex items-center gap-4 text-xs font-mono" style={{ color: 'hsl(var(--neon-green) / 0.6)' }}>
                             <span>{dateString} at {timeString}</span>
                             <span>•</span>
-                            <span>Score: {result.scoring_metrics?.score || 0}%</span>
-                            <span>•</span>
-                            <span>Passes: {result.scoring_metrics?.passes || 0}/{result.scoring_metrics?.totalSubs || 5}</span>
+                            <span>Score: {result.scoring_metrics?.final_score || 0}%</span>
+                            {result.scoring_metrics?.passes !== undefined && result.scoring_metrics?.totalSubs !== undefined && (
+                              <>
+                                <span>•</span>
+                                <span>Passes: {result.scoring_metrics.passes}/{result.scoring_metrics.totalSubs}</span>
+                              </>
+                            )}
                           </div>
+                          <details className="text-xs font-mono mt-2" style={{ color: 'hsl(var(--neon-green) / 0.6)' }}>
+                            <summary className="cursor-pointer">Show Gameplay Data</summary>
+                            <pre className="mt-2 p-2 bg-black/50 border border-neon-green/20 rounded-md text-xs overflow-auto">{JSON.stringify(result.gameplay_data, null, 2)}</pre>
+                          </details>
                         </div>
                       </div>
                       
@@ -416,7 +458,7 @@ const Profile = () => {
                           className="text-3xl font-bold"
                           style={{ color: borderColor }}
                         >
-                          {result.scoring_metrics?.score || 0}%
+                          {result.scoring_metrics?.final_score || 0}%
                         </div>
                         <div className="text-xs font-mono" style={{ color: 'hsl(var(--neon-green) / 0.5)' }}>
                           {isPass ? '✓ PASS' : '✗ FAIL'}

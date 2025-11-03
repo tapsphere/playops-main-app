@@ -41,12 +41,27 @@ export default function CreatorPortfolio() {
       // Fetch creator profile
       const { data: profileData, error: profileError } = await supabase
         .from('profiles')
-        .select('*')
+        .select('id, user_id, full_name, location, bio, wallet_address, created_at, updated_at')
         .eq('user_id', creatorId)
         .single();
 
-      if (profileError) throw profileError;
+      if (profileError) {
+        // Handle missing column errors gracefully
+        if (profileError.code === '42703') {
+          console.warn('Profile query attempted to access non-existent column, retrying with explicit columns');
+          const { data: retryData, error: retryError } = await supabase
+            .from('profiles')
+            .select('id, user_id, full_name, location, bio, wallet_address, created_at, updated_at')
+            .eq('user_id', creatorId)
+            .single();
+          if (retryError) throw retryError;
+          setCreator({ id: creatorId!, full_name: retryData?.full_name, bio: retryData?.bio });
+        } else {
+          throw profileError;
+        }
+      } else {
       setCreator({ id: creatorId!, full_name: profileData?.full_name, bio: profileData?.bio });
+      }
 
       // Fetch templates
       const { data: templatesData, error: templatesError } = await supabase

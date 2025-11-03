@@ -26,7 +26,7 @@ interface Template {
   } | null;
 }
 
-export default function TemplateDetail() {
+export const TemplateDetail = () => {
   const { templateId } = useParams();
   const navigate = useNavigate();
   const [template, setTemplate] = useState<Template | null>(null);
@@ -36,66 +36,93 @@ export default function TemplateDetail() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   useEffect(() => {
-    loadTemplate();
-    checkUserRole();
-  }, [templateId]);
+    const checkAndLoad = async () => {
+      setLoading(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      let isUserBrand = false;
+      if (user) {
+        setIsLoggedIn(true);
+        const { data: roles } = await supabase
+          .from('user_roles')
+          .select('role')
+          .eq('user_id', user.id)
+          .eq('role', 'brand')
+          .maybeSingle();
+        
+        if (roles) {
+          isUserBrand = true;
+          setIsBrand(true);
+        }
+      }
 
-  const checkUserRole = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      setIsLoggedIn(true);
-      const { data: roles } = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', user.id)
-        .eq('role', 'brand')
-        .maybeSingle();
-      
-      setIsBrand(!!roles);
-    }
-  };
+      if (!templateId) {
+        setLoading(false);
+        return;
+      }
 
-  const loadTemplate = async () => {
-    try {
-      if (!templateId) return;
+      // If the user is a brand, check for existing customization first
+      if (isUserBrand && user) {
+        const { data: customization, error: custError } = await supabase
+          .from('brand_customizations')
+          .select('id, generated_game_html')
+          .eq('brand_id', user.id)
+          .eq('template_id', templateId)
+          .not('generated_game_html', 'is', null)
+          .maybeSingle();
 
-      const { data, error } = await supabase
-        .from('game_templates')
-        .select('*')
-        .eq('id', templateId)
-        .eq('is_published', true)
-        .single();
+        if (custError) {
+          console.error("Error checking for customization:", custError);
+        }
 
-      if (error) throw error;
+        if (customization) {
+          toast.info('You have already customized this template.', {
+            description: 'Redirecting you to your brand dashboard.',
+          });
+          navigate('/platform/brand');
+          return; // Stop execution to prevent loading the page
+        }
+      }
 
-      // Fetch related data
-      const [profileData, competencyData] = await Promise.all([
-        supabase
-          .from('profiles')
-          .select('full_name')
-          .eq('user_id', data.creator_id)
-          .single(),
-        data.competency_id
-          ? supabase
-              .from('master_competencies')
-              .select('name, cbe_category, departments')
-              .eq('id', data.competency_id)
-              .single()
-          : null,
-      ]);
+      try {
+        const { data, error } = await supabase
+          .from('game_templates')
+          .select('*')
+          .eq('id', templateId)
+          .eq('is_published', true)
+          .single();
 
-      setTemplate({
-        ...data,
-        profiles: profileData.data || null,
-        master_competencies: competencyData?.data || null,
-      });
-    } catch (error: any) {
-      toast.error('Failed to load template details');
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
-  };
+        if (error) throw error;
+
+        const [profileData, competencyData] = await Promise.all([
+          supabase
+            .from('profiles')
+            .select('full_name')
+            .eq('user_id', data.creator_id)
+            .single(),
+          data.competency_id
+            ? supabase
+                .from('master_competencies')
+                .select('name, cbe_category, departments')
+                .eq('id', data.competency_id)
+                .single()
+            : null,
+        ]);
+
+        setTemplate({
+          ...data,
+          profiles: profileData.data || null,
+          master_competencies: competencyData?.data || null,
+        });
+      } catch (error: any) {
+        toast.error('Failed to load template details');
+        console.error(error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    checkAndLoad();
+  }, [templateId, navigate]);
 
   if (loading) {
     return (
