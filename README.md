@@ -1,73 +1,65 @@
-# Welcome to your Lovable project
+# PlayOps Main App
 
-## Project info
+This project is a web application with role-based access control for different types of users: player, creator, brand, and admin.
 
-**URL**: https://lovable.dev/projects/86589c2d-84a5-4b0a-9c24-5f5a77fb6135
+## Features
 
-## How can I edit this code?
+- **Player:** Can play games, view leaderboards, and manage their wallet.
+- **Creator:** Can create new game templates.
+- **Brand:** Can preview games, view player results, and manage game settings.
+- **Admin:** Can manage users and system settings.
 
-There are several ways of editing your application.
+## Getting Started
 
-**Use Lovable**
+### Prerequisites
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/86589c2d-84a5-4b0a-9c24-5f5a77fb6135) and start prompting.
+- Node.js and npm installed on your machine.
 
-Changes made via Lovable will be committed automatically to this repo.
+### Installation
 
-**Use your preferred IDE**
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/tapsphere/playops-main-app
+    ```
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+2.  **Navigate to the project directory:**
+    ```bash
+    cd playops-main-app
+    ```
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+3.  **Install dependencies:**
+    ```bash
+    npm install
+    ```
 
-Follow these steps:
+4.  **Environment Variables:**
+    - Create a `.env` file by copying the `.env.example` file.
+    - Update the environment variables in the `.env` file as needed.
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+5.  **Run the development server:**
+    ```bash
+    npm run dev
+    ```
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+6.  **Open the application:**
+    - Open your browser and navigate to `http://localhost:8080`.
 
-# Step 3: Install the necessary dependencies.
-npm i
+### User Roles
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
+To test the different user roles, you can log in with the following credentials (you might need to create these users in your database):
 
-**Edit a file directly in GitHub**
+-   **Player:** Access to the game lobby, leaderboard, and wallet.
+-   **Creator:** Access to the creator dashboard to create game templates.
+-   **Brand:** Access to the brand dashboard to manage games and view results.
+-   **Admin:** Access to the admin panel to manage users and roles.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+### Deployed Application
 
-**Use GitHub Codespaces**
+The application is deployed and accessible at the following URLs:
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
-
-## What technologies are used for this project?
-
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/86589c2d-84a5-4b0a-9c24-5f5a77fb6135) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+-   **Profile:** [https://playopsai.vercel.app/profile](https://playopsai.vercel.app/profile)
+-   **Lobby:** [https://playopsai.vercel.app/lobby](https://playopsai.vercel.app/lobby)
+-   **Leaderboard:** [https://playopsai.vercel.app/leaderboard](https://playopsai.vercel.app/leaderboard)
+-   **Wallet:** [https://playopsai.vercel.app/wallet](https://playopsai.vercel.app/wallet)
+-   **Creator Dashboard:** [https://playopsai.vercel.app/platform/creator](https://playopsai.vercel.app/platform/creator)
+-   **Brand Dashboard:** [https://playopsai.vercel.app/platform/brand](https://playopsai.vercel.app/platform/brand)
