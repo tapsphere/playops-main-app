@@ -71,7 +71,7 @@ type ValidatorData = {
     preview_image: string | null;
     competency_id: string;
     selected_sub_competencies: string[];
-  };
+  } | null;
 };
 
 import { supabase } from '@/integrations/supabase/client';
@@ -85,15 +85,28 @@ export default function Play() {
   const [isOwner, setIsOwner] = useState(false);
 
   const handleScoreSubmission = async (scoringMetrics: any, gameplayData: any) => {
-    if (!validator) return;
+    console.log("handleScoreSubmission called.");
+
+    if (!validator) {
+      console.error("handleScoreSubmission: validator is null.");
+      return;
+    }
+    if (!validator.game_templates) {
+      console.error("handleScoreSubmission: validator.game_templates is null or undefined.", { validator });
+      return;
+    }
+    console.log("Validator and game templates found.", { validator });
 
     toast.info('Submitting your score...');
 
     try {
+      console.log("Checking Supabase session...");
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
+        console.error("No active session found.");
         throw new Error("You must be logged in to submit a score.");
       }
+      console.log("Supabase session found.", { session });
 
       // Get current XP/PLYO BEFORE submission to use as animation start
       const { data: { user: currentUser } } = await supabase.auth.getUser();
@@ -110,21 +123,26 @@ export default function Play() {
         }
       }
 
+      const functionArgs = {
+        templateId: validator.template_id,
+        customizationId: validator.id,
+        competencyId: validator.game_templates.competency_id,
+        subCompetencyId: validator.game_templates.selected_sub_competencies[0], // Assuming the first sub competency
+        scoringMetrics,
+        gameplayData,
+      };
+
+      console.log("Invoking 'submit-score' function with args:", functionArgs);
       const { error: functionError } = await supabase.functions.invoke('submit-score', {
-        body: {
-          templateId: validator.template_id,
-          customizationId: validator.id,
-          competencyId: validator.game_templates.competency_id,
-          subCompetencyId: validator.game_templates.selected_sub_competencies[0], // Assuming the first sub competency
-          scoringMetrics,
-          gameplayData,
-        },
+        body: functionArgs,
       });
 
       if (functionError) {
+        console.error("Supabase function invocation error:", functionError);
         throw functionError;
       }
       
+      console.log("'submit-score' function invoked successfully.");
       toast.success('Score submitted successfully! Redirecting to profile...');
       
       // Confetti animation
@@ -160,13 +178,19 @@ export default function Play() {
 
   useEffect(() => {
     if (code) {
+      console.log("useEffect: code changed, calling loadValidator.", { code });
       loadValidator();
     }
   }, [code]);
 
   const loadValidator = async () => {
+    console.log("loadValidator called.");
     try {
-      if (!code) return;
+      if (!code) {
+        console.warn("loadValidator: No code parameter available.");
+        return;
+      }
+      console.log("loadValidator: Fetching validator for code:", code);
 
       const { data, error } = await supabase
         .from('brand_customizations')
@@ -191,20 +215,31 @@ export default function Play() {
         .eq('unique_code', code)
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('loadValidator: Error fetching validator:', error);
+        throw error;
+      }
 
-      setValidator(data as ValidatorData);
+      if (data) {
+        console.log("loadValidator: Validator data fetched successfully.", data);
+        console.log("loadValidator: game_templates from data:", data.game_templates);
+        setValidator(data as ValidatorData);
+      } else {
+        console.warn("loadValidator: No validator data returned for code:", code);
+        setError('Validator not found');
+      }
 
       const { data: { user } } = await supabase.auth.getUser();
       if (user && data && data.brand_id === user.id) {
         setIsOwner(true);
       }
     } catch (error: any) {
-      console.error('Failed to load validator:', error);
+      console.error('loadValidator: Failed to load validator:', error);
       setError('Failed to load validator');
       toast.error(error.message);
     } finally {
       setLoading(false);
+      console.log("loadValidator: Finished loading.");
     }
   };
 

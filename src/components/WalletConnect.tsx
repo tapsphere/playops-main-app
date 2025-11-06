@@ -1,4 +1,4 @@
-import { TonConnectButton, useTonWallet, useTonConnectUI } from '@tonconnect/ui-react';
+import { TonConnectButton, useTonWallet } from '@tonconnect/ui-react';
 import { ConnectButton, useActiveAccount } from 'thirdweb/react';
 import { createWallet } from "thirdweb/wallets";
 import { useEffect } from 'react';
@@ -8,7 +8,6 @@ import { client } from "@/providers/ThirdwebProvider";
 
 export function WalletConnect({ role }: { role?: 'creator' | 'brand' | 'player' }) {
   const tonWallet = useTonWallet();
-  const [tonConnectUI] = useTonConnectUI();
   const evmAccount = useActiveAccount();
   const evmAddress = evmAccount?.address;
   const { login, showOnboarding } = useAuth();
@@ -17,13 +16,13 @@ export function WalletConnect({ role }: { role?: 'creator' | 'brand' | 'player' 
     if (evmAddress) {
       login(evmAddress, 'EVM', role);
     }
-  }, [evmAddress]);
+  }, [evmAddress, login, role]);
 
   useEffect(() => {
     if (tonWallet) {
       login(tonWallet.account.address, 'TON', role);
     }
-  }, [tonWallet]);
+  }, [tonWallet, login, role]);
 
   if (showOnboarding) {
     // The OnboardingForm will be shown by the page, not the component itself.

@@ -1,32 +1,40 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { useNavigate, useSearchParams } from 'react-router-dom';
 import { uploadFile } from '@/utils/supabase';
-
 import { useAuth } from '@/contexts/AuthContext';
+import { Loader2 } from 'lucide-react';
 
 export const OnboardingForm = () => {
-  const [step, setStep] = useState(1);
   const [formData, setFormData] = useState({
     full_name: '',
     location: '',
     bio: '',
     company_name: '',
     company_description: '',
+    wallet_address: '',
   });
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [companyLogoFile, setCompanyLogoFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const redirectPath = searchParams.get('redirect');
-  const { completeOnboarding } = useAuth();
+  const { completePlayerOnboarding } = useAuth();
+
+  useEffect(() => {
+    const fetchUserWallet = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user && user.user_metadata.wallet_address) {
+        setFormData(prev => ({ ...prev, wallet_address: user.user_metadata.wallet_address }));
+      }
+    };
+    fetchUserWallet();
+  }, []);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -43,53 +51,15 @@ export const OnboardingForm = () => {
     }
   };
 
-  const handleNextStep = () => {
-    setStep(prev => prev + 1);
-  };
-
-  const handlePrevStep = () => {
-    setStep(prev => prev - 1);
-  };
-
-  const handleProfileUpdate = async () => {
+  const handleProfileUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!formData.full_name.trim()) {
       toast({ title: 'Please enter a name.', variant: 'destructive' });
       return;
     }
     setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('User not authenticated');
-
-      let avatarUrl = null;
-      if (avatarFile) {
-        avatarUrl = await uploadFile(avatarFile);
-      }
-
-      let companyLogoUrl = null;
-      if (companyLogoFile) {
-        companyLogoUrl = await uploadFile(companyLogoFile);
-      }
-
-      const { error } = await supabase
-        .from('profiles')
-        .update({
-          full_name: formData.full_name,
-          location: formData.location,
-          bio: formData.bio,
-          company_name: formData.company_name,
-          company_description: formData.company_description,
-          avatar_url: avatarUrl,
-          company_logo_url: companyLogoUrl,
-        })
-        .eq('user_id', user.id);
-
-      if (error) throw error;
-
-      toast({ title: 'Profile created successfully!' });
-      completeOnboarding();
-      navigate(redirectPath || '/lobby');
-
+      await completePlayerOnboarding(formData, avatarFile, companyLogoFile);
     } catch (error: any) {
       console.error('Profile update error:', error);
       toast({ title: 'Failed to create profile', description: error.message, variant: 'destructive' });
@@ -99,84 +69,109 @@ export const OnboardingForm = () => {
   };
 
   return (
-    <Card className="p-6 bg-gray-900/50 border-neon-green/30 space-y-6">
-      {step === 1 && (
-        <div>
-          <h3 className="text-xl font-bold text-white">Basic Information</h3>
-          <div className="grid gap-4 py-4">
+    <div className="min-h-screen bg-black flex items-center justify-center p-4">
+      <Card className="w-full max-w-md p-8 bg-gray-900 border-neon-green">
+        <h1 className="text-2xl font-bold text-center mb-2" style={{ color: 'hsl(var(--neon-green))' }}>
+          Complete Your Profile
+        </h1>
+        <p className="text-sm text-gray-400 text-center mb-6">
+          Tell us a bit about yourself to get started.
+        </p>
+        
+        <form onSubmit={handleProfileUpdate} className="space-y-6">
+          <div>
+            <Label htmlFor="full_name" className="text-white">Full Name</Label>
             <Input
               id="full_name"
               name="full_name"
               placeholder="Your Name or Nickname"
               value={formData.full_name}
               onChange={handleInputChange}
+              required
+              className="bg-gray-800 border-gray-700 text-white"
             />
-            <div>
-              <label htmlFor="avatar_url" className="text-sm font-medium text-gray-400">Profile Picture</label>
-              <Input id="avatar_url" name="avatar_url" type="file" onChange={handleFileChange} />
-            </div>
           </div>
-          <Button onClick={handleNextStep}>Next</Button>
-        </div>
-      )}
 
-      {step === 2 && (
-        <div>
-          <h3 className="text-xl font-bold text-white">Professional Information</h3>
-          <div className="grid gap-4 py-4">
+          <div>
+            <Label htmlFor="wallet_address" className="text-white">Wallet Address</Label>
+            <Input
+              id="wallet_address"
+              name="wallet_address"
+              value={formData.wallet_address}
+              disabled
+              className="bg-gray-800 border-gray-700 text-white"
+            />
+          </div>
+
+          <div>
+            <Label htmlFor="avatar_url" className="text-white">Profile Picture</Label>
+            <Input id="avatar_url" name="avatar_url" type="file" onChange={handleFileChange} className="bg-gray-800 border-gray-700 text-white file:text-gray-400" />
+          </div>
+
+          <Separator className="my-6 bg-gray-700" />
+
+          <div>
+            <Label htmlFor="location" className="text-white">Location</Label>
             <Input
               id="location"
               name="location"
-              placeholder="Your Location (e.g., City, Country)"
+              placeholder="e.g., City, Country"
               value={formData.location}
               onChange={handleInputChange}
+              className="bg-gray-800 border-gray-700 text-white"
             />
+          </div>
+
+          <div>
+            <Label htmlFor="bio" className="text-white">Short Bio</Label>
             <Textarea
               id="bio"
               name="bio"
               placeholder="A short bio about yourself"
               value={formData.bio}
               onChange={handleInputChange}
+              className="bg-gray-800 border-gray-700 text-white"
             />
           </div>
-          <div className="flex justify-between">
-            <Button variant="outline" onClick={handlePrevStep}>Back</Button>
-            <Button onClick={handleNextStep}>Next</Button>
-          </div>
-        </div>
-      )}
 
-      {step === 3 && (
-        <div>
-          <h3 className="text-xl font-bold text-white">Company Information (Optional)</h3>
-          <div className="grid gap-4 py-4">
+          <Separator className="my-6 bg-gray-700" />
+
+          <h2 className="text-lg font-semibold text-center text-gray-400">Company Information (Optional)</h2>
+
+          <div>
+            <Label htmlFor="company_name" className="text-white">Company Name</Label>
             <Input
               id="company_name"
               name="company_name"
-              placeholder="Company Name"
+              placeholder="Your Company"
               value={formData.company_name}
               onChange={handleInputChange}
+              className="bg-gray-800 border-gray-700 text-white"
             />
+          </div>
+
+          <div>
+            <Label htmlFor="company_description" className="text-white">Company Description</Label>
             <Textarea
               id="company_description"
               name="company_description"
-              placeholder="Company Description"
+              placeholder="What your company does"
               value={formData.company_description}
               onChange={handleInputChange}
+              className="bg-gray-800 border-gray-700 text-white"
             />
-            <div>
-              <label htmlFor="company_logo_url" className="text-sm font-medium text-gray-400">Company Logo</label>
-              <Input id="company_logo_url" name="company_logo_url" type="file" onChange={handleFileChange} />
-            </div>
           </div>
-          <div className="flex justify-between">
-            <Button variant="outline" onClick={handlePrevStep}>Back</Button>
-            <Button onClick={handleProfileUpdate} disabled={loading}>
-              {loading ? 'Saving...' : 'Save and Enter'}
-            </Button>
+
+          <div>
+            <Label htmlFor="company_logo_url" className="text-white">Company Logo</Label>
+            <Input id="company_logo_url" name="company_logo_url" type="file" onChange={handleFileChange} className="bg-gray-800 border-gray-700 text-white file:text-gray-400" />
           </div>
-        </div>
-      )}
-    </Card>
+
+          <Button type="submit" disabled={loading} className="w-full">
+            {loading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving...</> : 'Save and Enter'}
+          </Button>
+        </form>
+      </Card>
+    </div>
   );
 };

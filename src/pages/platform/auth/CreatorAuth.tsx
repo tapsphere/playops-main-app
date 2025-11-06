@@ -9,12 +9,20 @@ import { toast } from 'sonner';
 import { Palette } from 'lucide-react';
 import { WalletConnect } from '@/components/WalletConnect';
 import { useAuth } from '@/contexts/AuthContext';
+import { useActiveAccount, useDisconnect } from 'thirdweb/react';
+import { useTonWallet, useTonConnectUI } from '@tonconnect/ui-react';
+import { Address } from '@ton/core';
 
 export default function CreatorAuth() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const redirect = searchParams.get('redirect') || '/platform/creator';
-  const { loggedIn, showOnboarding, userRole } = useAuth();
+  const { loggedIn, showOnboarding, userRole, logout } = useAuth();
+
+  const evmAccount = useActiveAccount();
+  const { disconnect: evmDisconnect } = useDisconnect();
+  const tonWallet = useTonWallet();
+  const [tonConnectUI] = useTonConnectUI();
 
   // After wallet login, auto-redirect when creator role and no onboarding
   useEffect(() => {
@@ -29,6 +37,29 @@ export default function CreatorAuth() {
     password: '',
     fullName: '',
   });
+
+  const handleDisconnect = async () => {
+    if (tonWallet) {
+      await tonConnectUI.disconnect();
+    }
+    if (evmAccount) {
+      await evmDisconnect();
+    }
+    logout();
+  };
+
+  const formatAddress = (address: string) => {
+    try {
+      // Try parsing as TON address first
+      const tonAddr = Address.parse(address).toString({ bounceable: false, urlSafe: true });
+      return `${tonAddr.slice(0, 6)}...${tonAddr.slice(-4)}`;
+    } catch (e) {
+      // Fallback for EVM or other formats
+      return `${address.slice(0, 6)}...${address.slice(-4)}`;
+    }
+  };
+
+  const walletAddress = evmAccount?.address || tonWallet?.account.address;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -165,7 +196,24 @@ export default function CreatorAuth() {
 
           {/* Wallet Auth (TON + EVM) */}
           <div>
-            <WalletConnect role="creator" />
+            {loggedIn && walletAddress ? (
+              <Card className="w-full p-8 bg-gray-900 border-neon-green text-center">
+                <h1 className="text-2xl font-bold text-center mb-2" style={{ color: 'hsl(var(--neon-green))' }}>
+                  Connected
+                </h1>
+                <p className="text-sm text-gray-400 text-center mb-6">
+                  You are already connected.
+                </p>
+                <div className="mb-4 p-2 bg-black rounded-md font-mono text-neon-green break-all">
+                  {formatAddress(walletAddress)}
+                </div>
+                <Button onClick={handleDisconnect} variant="destructive" className="w-full">
+                  Disconnect
+                </Button>
+              </Card>
+            ) : (
+              <WalletConnect role="creator" />
+            )}
           </div>
         </div>
       </Card>

@@ -1,9 +1,10 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useActiveAccount } from 'thirdweb/react';
 import { useTonWallet } from '@tonconnect/ui-react';
 import { toast } from 'sonner';
+import { uploadFile } from '@/utils/supabase';
 
 type AuthContextType = {
   loggedIn: boolean;
@@ -11,9 +12,11 @@ type AuthContextType = {
   userRole: string | null;
   userId: string | null;
   isLoading: boolean;
+  pendingOnboardingInfo: { address: string, provider: 'TON' | 'EVM' } | null;
   login: (address: string, provider: 'TON' | 'EVM', role?: 'creator' | 'brand' | 'player' | 'admin') => Promise<void>;
   logout: () => void;
   completeOnboarding: () => void;
+  completePlayerOnboarding: (formData: any, avatarFile: File | null, companyLogoFile: File | null) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -21,81 +24,103 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loggedIn, setLoggedIn] = useState(sessionStorage.getItem('loggedIn') === 'true');
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [pendingOnboardingInfo, setPendingOnboardingInfo] = useState<{ address: string, provider: 'TON' | 'EVM' } | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const { toast: showToast } = useToast();
 
   useEffect(() => {
-    const fetchUser = async () => {
-      try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        setUserId(user.id);
-        const { data: profile, error: profileError } = await supabase
-          .from('user_roles')
-          .select('role')
-          .eq('user_id', user.id)
-          .single();
-          
-          // Handle missing role gracefully
-          if (profileError) {
-            if (profileError.code === 'PGRST116') {
-              // No role found, create default player role
-              const { error: insertError } = await supabase
-                .from('user_roles')
-                .insert({ user_id: user.id, role: 'player' });
-              if (!insertError) {
-                setUserRole('player');
-              }
-            } else if (profileError.code === '42703') {
-              // Column doesn't exist error - this shouldn't happen with user_roles
-              // but handle gracefully
-              console.warn('Role query error (column issue):', profileError.message);
-            } else {
-              console.error('Error fetching user role:', profileError);
-            }
-          } else if (profile) {
-          setUserRole(profile.role);
-          }
-        }
-      } catch (error: any) {
-        // Handle any errors gracefully, including profiles.role queries from cached code
-        if (error.code === '42703' && error.message?.includes('role')) {
-          console.warn('Profiles.role query detected (likely cached build issue). Ignoring error.');
-        } else {
-          console.error('Auth fetch error:', error);
-        }
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' && session) {
+        setLoggedIn(true);
+        setUserId(session.user.id);
+        fetchUserRole(session.user.id);
+        sessionStorage.setItem('loggedIn', 'true');
+      } else if (event === 'SIGNED_OUT') {
+        setLoggedIn(false);
+        setUserRole(null);
+        setUserId(null);
+        sessionStorage.removeItem('loggedIn');
       }
+      setIsLoading(false);
+    });
+
+    // Initial check
+    const checkInitialSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        setLoggedIn(true);
+        setUserId(session.user.id);
+        fetchUserRole(session.user.id);
+      } else {
+        setLoggedIn(false);
+      }
+      setIsLoading(false);
     };
 
-    if (loggedIn) {
-      fetchUser().finally(() => setIsLoading(false));
-    } else {
-      setIsLoading(false);
-    }
-  }, [loggedIn]);
+    checkInitialSession();
 
-  const login = async (address: string, provider: 'TON' | 'EVM', role: 'creator' | 'brand' | 'player' | 'admin' = 'player') => {
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  const fetchUserRole = async (userId: string) => {
+    try {
+      const { data: profile, error: profileError } = await supabase
+        .from('user_roles')
+        .select('role')
+        .eq('user_id', userId)
+        .single();
+
+      if (profileError) {
+        if (profileError.code === 'PGRST116') {
+          const { error: insertError } = await supabase
+            .from('user_roles')
+            .insert({ user_id: userId, role: 'player' });
+          if (!insertError) {
+            setUserRole('player');
+          }
+        } else {
+          console.error('Error fetching user role:', profileError);
+        }
+      } else if (profile) {
+        setUserRole(profile.role);
+      }
+    } catch (error: any) {
+      console.error('Auth fetch error:', error);
+    }
+  };
+
+  const login = useCallback(async (address: string, provider: 'TON' | 'EVM', role: 'creator' | 'brand' | 'player' | 'admin' = 'player') => {
     if (loggedIn && userRole && userRole !== role) {
       toast.error(`You are already logged in as a ${userRole}.`);
       return;
     }
     try {
-      const email = `${address}@${provider.toLowerCase()}.wallet`;
-      const password = `secret-${address}`;
+      const sanitizedAddress = address.replace(/[^a-zA-Z0-9._-]/g, '');
+      const email = `${sanitizedAddress}@${provider.toLowerCase()}.wallet`;
+      const password = `secret-${address.slice(0, 60)}`;
 
       const { data: { user }, error: fetchError } = await supabase.auth.signInWithPassword({ email, password });
 
       if (fetchError) {
         if (fetchError.message.includes('Invalid login credentials')) {
+          if (role === 'player') {
+            setPendingOnboardingInfo({ address, provider });
+            setShowOnboarding(true);
+            return;
+          }
+
+          // For roles other than player, sign up immediately
           const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
             email,
             password,
             options: {
               data: {
                 wallet_address: address,
-                full_name: `Player ${address.slice(0, 6)}`,
+                full_name: role === 'creator' ? 'New Creator' : 'New Brand',
               },
             },
           });
@@ -132,7 +157,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           .single();
 
         if (profileError) {
-          // If no role found, assign default 'player' role
           if (profileError.code === 'PGRST116') {
             const { error: insertError } = await supabase.from('user_roles').insert({ user_id: user.id, role: 'player' });
             if (insertError) throw insertError;
@@ -140,7 +164,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           } else {
             throw profileError;
           }
-        } else {
+        }
+        else {
           setUserRole(profile.role);
         }
       }
@@ -155,9 +180,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.error('Auth error:', error);
       toast.error('Authentication Failed', { description: error.message });
     }
-  };
+  }, [loggedIn, userRole]);
 
-  const logout = async () => {
+
+  const logout = useCallback(async () => {
     try {
       await supabase.auth.signOut();
     } catch (error) {
@@ -170,13 +196,81 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUserId(null);
       toast.info('You have been logged out.');
     }
-  };
+  }, []);
 
-  const completeOnboarding = () => {
+  const completeOnboarding = useCallback(() => {
     setShowOnboarding(false);
-  };
+  }, []);
 
-  const value = { loggedIn, showOnboarding, userRole, userId, isLoading, login, logout, completeOnboarding };
+  const completePlayerOnboarding = useCallback(async (formData: any, avatarFile: File | null, companyLogoFile: File | null) => {
+    if (!pendingOnboardingInfo) return;
+
+    const { address, provider } = pendingOnboardingInfo;
+    const sanitizedAddress = address.replace(/[^a-zA-Z0-9._-]/g, '');
+    const email = `${sanitizedAddress}@${provider.toLowerCase()}.wallet`;
+    const password = `secret-${address.slice(0, 60)}`;
+
+    try {
+      // 1. Sign up the user
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            wallet_address: address,
+            full_name: formData.full_name,
+          },
+        },
+      });
+
+      if (signUpError) throw signUpError;
+
+      const user = signUpData.user;
+      if (!user) throw new Error('User creation failed');
+
+      // The onAuthStateChange listener will handle setting the session
+      // Now that the user is created and will be logged in, proceed with uploads
+
+      // 2. Upload files
+      let avatarUrl = null;
+      if (avatarFile) {
+        avatarUrl = await uploadFile(avatarFile, 'avatars');
+      }
+
+      let companyLogoUrl = null;
+      if (companyLogoFile) {
+        companyLogoUrl = await uploadFile(companyLogoFile, 'logos');
+      }
+
+      // 3. Update the profile with all data
+      const profileData = {
+        ...formData,
+        avatar_url: avatarUrl,
+        company_logo_url: companyLogoUrl,
+      };
+
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update(profileData)
+        .eq('user_id', user.id);
+
+      if (profileError) throw profileError;
+
+      // 4. Finish onboarding
+      // The user role is already being created by the onAuthStateChange listener
+      setUserRole('player');
+
+      toast.success('Welcome! Your profile has been created.');
+      setShowOnboarding(false);
+      setPendingOnboardingInfo(null);
+
+    } catch (error: any) {
+      console.error('Onboarding error:', error);
+      toast.error('Onboarding Failed', { description: error.message });
+    }
+  }, [pendingOnboardingInfo]);
+
+  const value = { loggedIn, showOnboarding, userRole, userId, isLoading, login, logout, completeOnboarding, completePlayerOnboarding, pendingOnboardingInfo };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

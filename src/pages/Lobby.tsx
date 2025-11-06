@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Building2, Search, Target, ChevronRight, Star, Zap, Rocket, Sparkles, Home, User, Hexagon, TrendingUp, Wallet } from 'lucide-react';
 import PlayerHeader from '@/components/ui/PlayerHeader';
 import { WalletConnect } from '@/components/WalletConnect';
-import { useTonWallet, useTonConnectUI } from '@tonconnect/ui-react';
+import { useTonWallet } from '@tonconnect/ui-react';
 import { useActiveAccount } from 'thirdweb/react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';

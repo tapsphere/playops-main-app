@@ -1,32 +1,16 @@
 import { TonConnectUIProvider } from '@tonconnect/ui-react';
-import { ReactNode, useEffect } from 'react';
+import { ReactNode } from 'react';
 
-const manifestUrl = 'https://violet-traditional-rabbit-103.mypinata.cloud/ipfs/QmQJJAdZ2qSwdepvb5evJq7soEBueFenHLX3PoM6tiBffm';
+// This manifest is taken from the example app and should be replaced with your own
+const manifestUrl = "https://coral-electoral-eagle-264.mypinata.cloud/ipfs/bafkreifrendqtimtbuvfnnclfv6ert33yrvb4jdvjyxk6gxg4zqupdtize";
 
 interface TonConnectProviderProps {
   children: ReactNode;
 }
 
 export function TonConnectProvider({ children }: TonConnectProviderProps) {
-  useEffect(() => {
-    console.log('TON Connect manifest URL:', manifestUrl);
-    // Test if manifest is accessible
-    fetch(manifestUrl)
-      .then(res => {
-        console.log('Manifest fetch status:', res.status);
-        return res.json();
-      })
-      .then(data => console.log('Manifest data:', data))
-      .catch(err => console.error('Manifest fetch error:', err));
-  }, []);
-
   return (
-    <TonConnectUIProvider 
-      manifestUrl={manifestUrl}
-      actionsConfiguration={{
-        twaReturnUrl: 'https://t.me/PlayOpsBot'
-      }}
-    >
+    <TonConnectUIProvider manifestUrl={manifestUrl}>
       {children}
     </TonConnectUIProvider>
   );
