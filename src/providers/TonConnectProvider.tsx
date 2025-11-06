@@ -2,7 +2,7 @@ import { TonConnectUIProvider } from '@tonconnect/ui-react';
 import { ReactNode, useEffect } from 'react';
 
 // Use relative URL for local development to avoid CORS issues
-const manifestUrl = '/tonconnect-manifest.json';
+const manifestUrl = 'https://violet-traditional-rabbit-103.mypinata.cloud/ipfs/QmQJJAdZ2qSwdepvb5evJq7soEBueFenHLX3PoM6tiBffm';
 
 interface TonConnectProviderProps {
   children: ReactNode;
