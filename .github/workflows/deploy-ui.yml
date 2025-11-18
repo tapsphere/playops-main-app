@@ -1,0 +1,78 @@
+name: CI/CD → Hetzner (PlayOps UI)
+ 
+on:
+  workflow_dispatch:
+ 
+jobs:
+  deploy:
+    name: Build & Deploy UI to Hetzner (manual)
+    runs-on: ubuntu-latest
+    environment: test-server
+ 
+    env:
+      # SSH host/user (from environment secrets)
+      HZ_HOST: ${{ secrets.HZ_HOST }}
+      HZ_USER: ${{ secrets.HZ_USER }}
+ 
+      # Build-time Vite variables (only those actually in your repo)
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_PROJECT_ID: ${{ secrets.VITE_SUPABASE_PROJECT_ID }}
+      VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+ 
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+ 
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+ 
+      - name: Install dependencies (playops-ui)
+        working-directory: ./playops-ui
+        run: |
+          npm ci
+ 
+      - name: Build production bundle (playops-ui)
+        working-directory: ./playops-ui
+        run: |
+          npm run build
+ 
+      - name: Show dist contents
+        working-directory: ./playops-ui
+        run: |
+          du -sh dist || true
+          ls -la dist | sed -n '1,120p' || true
+ 
+      - name: Start SSH agent and add key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.HZ_SSH_KEY }}
+ 
+      - name: Add Hetzner host to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "${{ secrets.HZ_HOST }}" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+ 
+      - name: Rsync dist to Hetzner (/var/www/playops-ui)
+        run: |
+          RSYNC_RSH="ssh -o StrictHostKeyChecking=yes"
+          rsync -az --delete --omit-dir-times --chmod=Du=rwx,Dg=rx,Do=rx,Fu=rw,Fg=r,Fo=r \
+            -e "$RSYNC_RSH" \
+            ./playops-ui/dist/ "${{ secrets.HZ_USER }}@${{ secrets.HZ_HOST }}:/var/www/playops-ui"
+ 
+      - name: Ensure perms and reload Caddy on Hetzner
+        run: |
+          ssh -o StrictHostKeyChecking=yes "${{ secrets.HZ_USER }}@${{ secrets.HZ_HOST }}" \
+            "sudo mkdir -p /var/www/playops-ui || true &&
+             sudo chown -R root:caddy /var/www/playops-ui || true &&
+             sudo chmod -R 755 /var/www/playops-ui || true &&
+             sudo systemctl reload caddy || sudo systemctl restart caddy || true &&
+             echo 'Deployed to /var/www/playops-ui and reloaded Caddy.'"
+ 
+      - name: Post-deploy quick check (best-effort)
+        run: |
+          echo "Attempting quick GET (may fail if DNS/certs not ready)..."
+          curl -I "https://playops-ui-test.tapsphere.io" -m 10 || true
