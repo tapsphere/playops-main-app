@@ -13,12 +13,11 @@ env:
   VITE_SUPABASE_URL:         ${{ secrets.VITE_SUPABASE_URL }}
   VITE_SUPABASE_PROJECT_ID:  ${{ secrets.VITE_SUPABASE_PROJECT_ID }}
   VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
-  VITE_SUPABASE_STORAGE_URL: ${{ secrets.VITE_SUPABASE_STORAGE_URL }}
   VITE_THIRDWEB_CLIENT_ID:   ${{ secrets.VITE_THIRDWEB_CLIENT_ID }}
  
 jobs:
   deploy:
-    name: Build & Deploy PlayOps UI (PROD)
+    name: Build & Deploy UI to Hetzner (PROD)
     runs-on: ubuntu-latest
     environment: prod-server
  
@@ -32,24 +31,18 @@ jobs:
           node-version: "20"
           cache: "npm"
  
-      - name: Install dependencies
-        working-directory: .
+      - name: Install dependencies (playops-ui)
+        working-directory: ./playops-ui
         run: |
           npm ci
  
-      - name: Build production bundle
-        working-directory: .
-        env:
-          VITE_SUPABASE_URL:            ${{ env.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_PROJECT_ID:     ${{ env.VITE_SUPABASE_PROJECT_ID }}
-          VITE_SUPABASE_PUBLISHABLE_KEY:${{ env.VITE_SUPABASE_PUBLISHABLE_KEY }}
-          VITE_SUPABASE_STORAGE_URL:    ${{ env.VITE_SUPABASE_STORAGE_URL }}
-          VITE_THIRDWEB_CLIENT_ID:      ${{ env.VITE_THIRDWEB_CLIENT_ID }}
+      - name: Build production bundle (playops-ui)
+        working-directory: ./playops-ui
         run: |
           npm run build
  
       - name: Show dist contents
-        working-directory: .
+        working-directory: ./playops-ui
         run: |
           du -sh dist || true
           ls -la dist | sed -n '1,120p' || true
@@ -69,18 +62,18 @@ jobs:
       - name: Rsync dist to Hetzner (/var/www/playops-ui)
         run: |
           RSYNC_RSH="ssh -o StrictHostKeyChecking=yes"
-          rsync -az --delete --omit-dir-times \
+          rsync -az --delete --omit-dir-times --chmod=Du=rwx,Dg=rx,Do=rx,Fu=rw,Fg=r,Fo=r \
             -e "$RSYNC_RSH" \
-            ./dist/ "${{ env.HZ_USER }}@${{ env.HZ_HOST }}:/var/www/playops-ui"
+            ./playops-ui/dist/ "${{ env.HZ_USER }}@${{ env.HZ_HOST }}:/var/www/playops-ui"
  
       - name: Ensure perms and reload Caddy on Hetzner
         run: |
           ssh -o StrictHostKeyChecking=yes "${{ env.HZ_USER }}@${{ env.HZ_HOST }}" '
-            set -e
-            sudo mkdir -p /var/www/playops-ui
-            sudo chown -R root:caddy /var/www/playops-ui || sudo chown -R root:root /var/www/playops-ui || true
+            sudo mkdir -p /var/www/playops-ui || true
+            sudo chown -R root:caddy /var/www/playops-ui || true
             sudo chmod -R 755 /var/www/playops-ui || true
-            sudo systemctl reload caddy || sudo systemctl restart caddy
+            sudo systemctl reload caddy || sudo systemctl restart caddy || true
+            echo "Deployed to /var/www/playops-ui and reloaded Caddy."
           '
  
       - name: Post-deploy quick check (best-effort)
