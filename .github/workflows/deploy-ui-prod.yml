@@ -1,28 +1,28 @@
 name: CI/CD → Hetzner (PlayOps UI PROD)
  
+# Manual trigger only (workflow_dispatch)
 on:
-  # Manual deploy for now; can add push->main later
   workflow_dispatch:
  
 env:
   # --- Hetzner SSH (PROD) ---
-  HZ_HOST:                   ${{ secrets.HZ_HOST_PROD }}
-  HZ_USER:                   ${{ secrets.HZ_USER_PROD }}
+  HZ_HOST: ${{ secrets.HZ_HOST_PROD }}
+  HZ_USER: ${{ secrets.HZ_USER_PROD }}
  
   # --- Vite / Supabase / Thirdweb (PROD) ---
-  VITE_SUPABASE_URL:         ${{ secrets.VITE_SUPABASE_URL }}
-  VITE_SUPABASE_PROJECT_ID:  ${{ secrets.VITE_SUPABASE_PROJECT_ID }}
+  VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+  VITE_SUPABASE_PROJECT_ID: ${{ secrets.VITE_SUPABASE_PROJECT_ID }}
   VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
-  VITE_THIRDWEB_CLIENT_ID:   ${{ secrets.VITE_THIRDWEB_CLIENT_ID }}
+  VITE_THIRDWEB_CLIENT_ID: ${{ secrets.VITE_THIRDWEB_CLIENT_ID }}
  
 jobs:
   deploy:
-    name: Build & Deploy UI to Hetzner (PROD)
+    name: Build & Deploy UI to Hetzner (PROD, manual)
     runs-on: ubuntu-latest
     environment: prod-server
  
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
  
       - name: Use Node.js 20
@@ -39,44 +39,71 @@ jobs:
       - name: Build production bundle (playops-ui)
         working-directory: ./playops-ui
         run: |
+          set -euo pipefail
           npm run build
  
-      - name: Show dist contents
+      - name: Verify build output (fail if missing/empty)
         working-directory: ./playops-ui
         run: |
+          set -euo pipefail
+          if [ ! -d dist ] || [ -z "$(ls -A dist 2>/dev/null)" ]; then
+            echo "ERROR: ./playops-ui/dist is missing or empty after build."
+            ls -la || true
+            exit 1
+          fi
+          echo "Build verified: ./playops-ui/dist exists and is not empty."
           du -sh dist || true
           ls -la dist | sed -n '1,120p' || true
  
-      - name: Start SSH agent and add key (Hetzner PROD)
+      - name: Start SSH agent and add Hetzner PROD key
         uses: webfactory/ssh-agent@v0.9.0
         with:
-          ssh-private-key: |
-            ${{ secrets.HZ_SSH_KEY_PROD }}
+          ssh-private-key: ${{ secrets.HZ_SSH_KEY_PROD }}
  
       - name: Add Hetzner PROD host to known_hosts
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -H "${{ env.HZ_HOST }}" >> ~/.ssh/known_hosts
+          ssh-keyscan -H "${{ secrets.HZ_HOST_PROD }}" >> ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
  
       - name: Rsync dist to Hetzner (/var/www/playops-ui)
         run: |
+          set -euo pipefail
           RSYNC_RSH="ssh -o StrictHostKeyChecking=yes"
           rsync -az --delete --omit-dir-times --chmod=Du=rwx,Dg=rx,Do=rx,Fu=rw,Fg=r,Fo=r \
-            -e "$RSYNC_RSH" \
-            ./playops-ui/dist/ "${{ env.HZ_USER }}@${{ env.HZ_HOST }}:/var/www/playops-ui"
+            -e "$RSYNC_RSH" ./playops-ui/dist/ "${{ secrets.HZ_USER_PROD }}@${{ secrets.HZ_HOST_PROD }}:/var/www/playops-ui/"
  
       - name: Ensure perms and reload Caddy on Hetzner
         run: |
-          ssh -o StrictHostKeyChecking=yes "${{ env.HZ_USER }}@${{ env.HZ_HOST }}" '
+          set -euo pipefail
+          ssh -o StrictHostKeyChecking=yes "${{ secrets.HZ_USER_PROD }}@${{ secrets.HZ_HOST_PROD }}" bash -lc '
+            set -euo pipefail
             sudo mkdir -p /var/www/playops-ui || true
-            sudo chown -R root:caddy /var/www/playops-ui || true
-            sudo chmod -R 755 /var/www/playops-ui || true
-            sudo systemctl reload caddy || sudo systemctl restart caddy || true
-            echo "Deployed to /var/www/playops-ui and reloaded Caddy."
+ 
+            # Prefer caddy user if available (keeps permissions minimal)
+            if id -u caddy >/dev/null 2>&1; then
+              sudo chown -R caddy:caddy /var/www/playops-ui || true
+            else
+              sudo chown -R root:caddy /var/www/playops-ui || true
+            fi
+ 
+            # Set safe directory and file perms
+            sudo find /var/www/playops-ui -type d -exec chmod 755 {} \; || true
+            sudo find /var/www/playops-ui -type f -exec chmod 644 {} \; || true
+ 
+            # Reload Caddy with a restart fallback (idempotent)
+            if sudo systemctl --no-block reload caddy 2>/dev/null; then
+              echo "Caddy reload requested"
+            else
+              sudo systemctl restart caddy || true
+              echo "Caddy restarted (reload fallback)"
+            fi
+ 
+            echo "Deployed to /var/www/playops-ui and reloaded Caddy (or restarted as fallback)."
           '
  
-      - name: Post-deploy quick check (best-effort)
+      - name: Post-deploy quick smoke-check (best-effort)
         run: |
-          echo "Attempting quick GET (may fail if DNS/certs not ready)..."
+          echo "Attempting quick GET (may fail if DNS/certs not yet ready)..."
+          # Best-effort; don't fail the workflow here since DNS/certs may take a moment
           curl -I "https://playops-main-app.tapsphere.io" -m 10 || true
