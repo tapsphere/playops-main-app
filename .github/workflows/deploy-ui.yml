@@ -8,16 +8,15 @@ jobs:
     name: Build & Deploy UI to Hetzner (manual)
     runs-on: ubuntu-latest
     environment: test-server
- 
     env:
-      # SSH host/user (from environment secrets)
+      # SSH host/user (set these as repository or environment secrets)
       HZ_HOST: ${{ secrets.HZ_HOST }}
       HZ_USER: ${{ secrets.HZ_USER }}
  
-      # Build-time Vite variables (only those actually in your repo)
-      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-      VITE_SUPABASE_PROJECT_ID: ${{ secrets.VITE_SUPABASE_PROJECT_ID }}
-      VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+      # Build-time Vite variables (only add these secrets if the repo references them)
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || '' }}
+      VITE_SUPABASE_PROJECT_ID: ${{ secrets.VITE_SUPABASE_PROJECT_ID || '' }}
+      VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY || '' }}
  
     steps:
       - name: Checkout repo
@@ -26,8 +25,8 @@ jobs:
       - name: Use Node.js 20
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "npm"
+          node-version: '20'
+          cache: 'npm'
  
       - name: Install dependencies (playops-ui)
         working-directory: ./playops-ui
@@ -39,7 +38,17 @@ jobs:
         run: |
           npm run build
  
-      - name: Show dist contents
+      - name: Verify build output exists
+        working-directory: ./playops-ui
+        run: |
+          if [ ! -d dist ] || [ -z "$(ls -A dist 2>/dev/null)" ]; then
+            echo "ERROR: dist/ missing or empty after build."
+            ls -la
+            exit 1
+          fi
+          echo "dist/ exists and contains files."
+ 
+      - name: Show dist contents (short)
         working-directory: ./playops-ui
         run: |
           du -sh dist || true
@@ -57,22 +66,39 @@ jobs:
           chmod 600 ~/.ssh/known_hosts
  
       - name: Rsync dist to Hetzner (/var/www/playops-ui)
+        env:
+          HZ_USER: ${{ secrets.HZ_USER }}
+          HZ_HOST: ${{ secrets.HZ_HOST }}
         run: |
           RSYNC_RSH="ssh -o StrictHostKeyChecking=yes"
           rsync -az --delete --omit-dir-times --chmod=Du=rwx,Dg=rx,Do=rx,Fu=rw,Fg=r,Fo=r \
-            -e "$RSYNC_RSH" \
-            ./playops-ui/dist/ "${{ secrets.HZ_USER }}@${{ secrets.HZ_HOST }}:/var/www/playops-ui"
+            -e "$RSYNC_RSH" ./playops-ui/dist/ "${HZ_USER}@${HZ_HOST}:/var/www/playops-ui/"
  
       - name: Ensure perms and reload Caddy on Hetzner
+        env:
+          HZ_USER: ${{ secrets.HZ_USER }}
+          HZ_HOST: ${{ secrets.HZ_HOST }}
         run: |
-          ssh -o StrictHostKeyChecking=yes "${{ secrets.HZ_USER }}@${{ secrets.HZ_HOST }}" \
-            "sudo mkdir -p /var/www/playops-ui || true &&
-             sudo chown -R root:caddy /var/www/playops-ui || true &&
-             sudo chmod -R 755 /var/www/playops-ui || true &&
-             sudo systemctl reload caddy || sudo systemctl restart caddy || true &&
-             echo 'Deployed to /var/www/playops-ui and reloaded Caddy.'"
+          ssh -o StrictHostKeyChecking=yes "${HZ_USER}@${HZ_HOST}" '
+            set -euo pipefail
+            # Ensure directory exists (might be created by rsync)
+            sudo mkdir -p /var/www/playops-ui
+            # Make caddy the owner (caddy user must exist)
+            sudo chown -R caddy:caddy /var/www/playops-ui || sudo chown -R root:caddy /var/www/playops-ui || true
+            # Ensure directory+files have sensible perms
+            sudo find /var/www/playops-ui -type d -exec chmod 755 {} \; || true
+            sudo find /var/www/playops-ui -type f -exec chmod 644 {} \; || true
+            # Reload Caddy (reload preferred, restart as fallback)
+            if sudo systemctl reload caddy; then
+              echo "Caddy reloaded"
+            else
+              sudo systemctl restart caddy || true
+              echo "Caddy restarted"
+            fi
+            echo "Deployed to /var/www/playops-ui and reloaded Caddy."
+          '
  
-      - name: Post-deploy quick check (best-effort)
+      - name: Post-deploy quick smoke check (best-effort)
         run: |
-          echo "Attempting quick GET (may fail if DNS/certs not ready)..."
-          curl -I "https://playops-ui-test.tapsphere.io" -m 10 || true
+          echo "GET https://playops-ui-test.tapsphere.io/platform/creator"
+          curl -sS -I --retry 3 --retry-delay 2 --max-time 10 "https://playops-ui-test.tapsphere.io/platform/creator" || true
