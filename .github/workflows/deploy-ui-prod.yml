@@ -32,26 +32,22 @@ jobs:
           cache: "npm"
  
       - name: Install dependencies (playops-ui)
-        working-directory: ./playops-ui
         run: |
           npm ci
  
       - name: Build production bundle (playops-ui)
-        working-directory: ./playops-ui
         run: |
-          set -euo pipefail
           npm run build
  
       - name: Verify build output (fail if missing/empty)
-        working-directory: ./playops-ui
         run: |
           set -euo pipefail
           if [ ! -d dist ] || [ -z "$(ls -A dist 2>/dev/null)" ]; then
-            echo "ERROR: ./playops-ui/dist is missing or empty after build."
+            echo "ERROR: ./dist is missing or empty after build."
             ls -la || true
             exit 1
           fi
-          echo "Build verified: ./playops-ui/dist exists and is not empty."
+          echo "Build verified: ./dist exists and is not empty."
           du -sh dist || true
           ls -la dist | sed -n '1,120p' || true
  
@@ -71,7 +67,7 @@ jobs:
           set -euo pipefail
           RSYNC_RSH="ssh -o StrictHostKeyChecking=yes"
           rsync -az --delete --omit-dir-times --chmod=Du=rwx,Dg=rx,Do=rx,Fu=rw,Fg=r,Fo=r \
-            -e "$RSYNC_RSH" ./playops-ui/dist/ "${{ secrets.HZ_USER_PROD }}@${{ secrets.HZ_HOST_PROD }}:/var/www/playops-ui/"
+            -e "$RSYNC_RSH" ./dist/ "${{ secrets.HZ_USER_PROD }}@${{ secrets.HZ_HOST_PROD }}:/var/www/playops-ui/"
  
       - name: Ensure perms and reload Caddy on Hetzner
         run: |
