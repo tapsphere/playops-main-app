@@ -1,8 +1,8 @@
 name: CI/CD → Hetzner (PlayOps UI)
- 
+
 on:
   workflow_dispatch:
- 
+
 jobs:
   deploy:
     name: Build & Deploy UI to Hetzner (manual)
@@ -12,34 +12,32 @@ jobs:
       # SSH host/user (set these as repository or environment secrets)
       HZ_HOST: ${{ secrets.HZ_HOST }}
       HZ_USER: ${{ secrets.HZ_USER }}
- 
+
       # Build-time Vite variables (only add these secrets if the repo references them)
       VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || '' }}
       VITE_SUPABASE_PROJECT_ID: ${{ secrets.VITE_SUPABASE_PROJECT_ID || '' }}
       VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY || '' }}
- 
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
- 
+
       - name: Use Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
- 
+
       - name: Install dependencies (playops-ui)
-        working-directory: ./playops-ui
+        # app lives at repo root, so no working-directory
         run: |
           npm ci
- 
+
       - name: Build production bundle (playops-ui)
-        working-directory: ./playops-ui
         run: |
           npm run build
- 
+
       - name: Verify build output exists
-        working-directory: ./playops-ui
         run: |
           if [ ! -d dist ] || [ -z "$(ls -A dist 2>/dev/null)" ]; then
             echo "ERROR: dist/ missing or empty after build."
@@ -47,24 +45,23 @@ jobs:
             exit 1
           fi
           echo "dist/ exists and contains files."
- 
+
       - name: Show dist contents (short)
-        working-directory: ./playops-ui
         run: |
           du -sh dist || true
           ls -la dist | sed -n '1,120p' || true
- 
+
       - name: Start SSH agent and add key
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.HZ_SSH_KEY }}
- 
+
       - name: Add Hetzner host to known_hosts
         run: |
           mkdir -p ~/.ssh
           ssh-keyscan -H "${{ secrets.HZ_HOST }}" >> ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
- 
+
       - name: Rsync dist to Hetzner (/var/www/playops-ui)
         env:
           HZ_USER: ${{ secrets.HZ_USER }}
@@ -72,8 +69,8 @@ jobs:
         run: |
           RSYNC_RSH="ssh -o StrictHostKeyChecking=yes"
           rsync -az --delete --omit-dir-times --chmod=Du=rwx,Dg=rx,Do=rx,Fu=rw,Fg=r,Fo=r \
-            -e "$RSYNC_RSH" ./playops-ui/dist/ "${HZ_USER}@${HZ_HOST}:/var/www/playops-ui/"
- 
+            -e "$RSYNC_RSH" ./dist/ "${HZ_USER}@${HZ_HOST}:/var/www/playops-ui/"
+
       - name: Ensure perms and reload Caddy on Hetzner
         env:
           HZ_USER: ${{ secrets.HZ_USER }}
@@ -97,7 +94,7 @@ jobs:
             fi
             echo "Deployed to /var/www/playops-ui and reloaded Caddy."
           '
- 
+
       - name: Post-deploy quick smoke check (best-effort)
         run: |
           echo "GET https://playops-ui-test.tapsphere.io/platform/creator"
