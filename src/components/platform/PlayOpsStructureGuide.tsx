@@ -1,6 +1,6 @@
 import React from "react";
 
-const PlayOpsStructureGuide: React.FC = () => {
+export const PlayOpsStructureGuide: React.FC = () => {
   return (
     <div className="p-4 space-y-2">
       <h2 className="text-lg font-semibold">PlayOps Structure Guide</h2>
@@ -11,5 +11,3 @@ const PlayOpsStructureGuide: React.FC = () => {
     </div>
   );
 };
-
-export default PlayOpsStructureGuide;
