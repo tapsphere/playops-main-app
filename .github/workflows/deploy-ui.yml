@@ -9,11 +9,11 @@ jobs:
     runs-on: ubuntu-latest
     environment: test-server
     env:
-      # SSH host/user (set these as repository or environment secrets)
-      HZ_HOST: ${{ secrets.HZ_HOST }}
-      HZ_USER: ${{ secrets.HZ_USER }}
+      # SSH host/user now taken from environment VARIABLES, not secrets
+      HZ_HOST: ${{ vars.HZ_HOST }}
+      HZ_USER: ${{ vars.HZ_USER }}
 
-      # Build-time Vite variables (only add these secrets if the repo references them)
+      # Build-time Vite variables (still from secrets)
       VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || '' }}
       VITE_SUPABASE_PROJECT_ID: ${{ secrets.VITE_SUPABASE_PROJECT_ID || '' }}
       VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY || '' }}
@@ -30,7 +30,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies (playops-ui)
-        # app lives at repo root, so no working-directory
+        # app lives at repo root
         run: |
           npm ci
 
@@ -52,34 +52,30 @@ jobs:
           du -sh dist || true
           ls -la dist | sed -n '1,120p' || true
 
-      # REMOVED webfactory/ssh-agent – we will manage the key ourselves
-
       - name: Add Hetzner host to known_hosts
         run: |
+          set -euo pipefail
+          if [ -z "${HZ_HOST:-}" ]; then
+            echo "::error::HZ_HOST is empty. Define environment variable HZ_HOST for environment 'test-server'."
+            exit 1
+          fi
           mkdir -p ~/.ssh
-          ssh-keyscan -H "${HZ_HOST}" >> ~/.ssh/known_hosts
+          ssh-keyscan -H "$HZ_HOST" >> ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
       - name: Write SSH private key to file
         run: |
           mkdir -p ~/.ssh
-          # Write the private key from the secret exactly as-is
           printf '%s\n' "${{ secrets.HZ_SSH_KEY }}" > ~/.ssh/hz_test_key
           chmod 600 ~/.ssh/hz_test_key
 
       - name: Rsync dist to Hetzner (/var/www/playops-ui)
-        env:
-          HZ_USER: ${{ secrets.HZ_USER }}
-          HZ_HOST: ${{ secrets.HZ_HOST }}
         run: |
           RSYNC_RSH="ssh -i ~/.ssh/hz_test_key -o StrictHostKeyChecking=yes"
           rsync -az --delete --omit-dir-times --chmod=Du=rwx,Dg=rx,Do=rx,Fu=rw,Fg=r,Fo=r \
             -e "$RSYNC_RSH" ./dist/ "${HZ_USER}@${HZ_HOST}:/var/www/playops-ui/"
 
       - name: Ensure perms and reload Caddy on Hetzner
-        env:
-          HZ_USER: ${{ secrets.HZ_USER }}
-          HZ_HOST: ${{ secrets.HZ_HOST }}
         run: |
           ssh -i ~/.ssh/hz_test_key -o StrictHostKeyChecking=yes "${HZ_USER}@${HZ_HOST}" '
             set -euo pipefail
